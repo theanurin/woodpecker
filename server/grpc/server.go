@@ -23,14 +23,14 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/woodpecker-ci/woodpecker/pipeline/rpc"
-	"github.com/woodpecker-ci/woodpecker/pipeline/rpc/proto"
-	"github.com/woodpecker-ci/woodpecker/server/forge"
-	"github.com/woodpecker-ci/woodpecker/server/logging"
-	"github.com/woodpecker-ci/woodpecker/server/pubsub"
-	"github.com/woodpecker-ci/woodpecker/server/queue"
-	"github.com/woodpecker-ci/woodpecker/server/store"
-	"github.com/woodpecker-ci/woodpecker/version"
+	"go.woodpecker-ci.org/woodpecker/v2/pipeline/rpc"
+	"go.woodpecker-ci.org/woodpecker/v2/pipeline/rpc/proto"
+	"go.woodpecker-ci.org/woodpecker/v2/server/forge"
+	"go.woodpecker-ci.org/woodpecker/v2/server/logging"
+	"go.woodpecker-ci.org/woodpecker/v2/server/pubsub"
+	"go.woodpecker-ci.org/woodpecker/v2/server/queue"
+	"go.woodpecker-ci.org/woodpecker/v2/server/store"
+	"go.woodpecker-ci.org/woodpecker/v2/version"
 )
 
 // WoodpeckerServer is a grpc server implementation.
@@ -39,7 +39,7 @@ type WoodpeckerServer struct {
 	peer RPC
 }
 
-func NewWoodpeckerServer(forge forge.Forge, queue queue.Queue, logger logging.Log, pubsub pubsub.Publisher, store store.Store, host string) proto.WoodpeckerServer {
+func NewWoodpeckerServer(forge forge.Forge, queue queue.Queue, logger logging.Log, pubsub *pubsub.Publisher, store store.Store) proto.WoodpeckerServer {
 	pipelineTime := promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: "woodpecker",
 		Name:      "pipeline_time",
@@ -56,7 +56,6 @@ func NewWoodpeckerServer(forge forge.Forge, queue queue.Queue, logger logging.Lo
 		queue:         queue,
 		pubsub:        pubsub,
 		logger:        logger,
-		host:          host,
 		pipelineTime:  pipelineTime,
 		pipelineCount: pipelineCount,
 	}
@@ -84,10 +83,10 @@ func (s *WoodpeckerServer) Next(c context.Context, req *proto.NextRequest) (*pro
 		return res, status.Error(codes.Unavailable, "no pipeline available")
 	}
 
-	res.Pipeline = new(proto.Pipeline)
-	res.Pipeline.Id = pipeline.ID
-	res.Pipeline.Timeout = pipeline.Timeout
-	res.Pipeline.Payload, _ = json.Marshal(pipeline.Config)
+	res.Workflow = new(proto.Workflow)
+	res.Workflow.Id = pipeline.ID
+	res.Workflow.Timeout = pipeline.Timeout
+	res.Workflow.Payload, err = json.Marshal(pipeline.Config)
 
 	return res, err
 }
@@ -98,7 +97,7 @@ func (s *WoodpeckerServer) Init(c context.Context, req *proto.InitRequest) (*pro
 		ExitCode: int(req.GetState().GetExitCode()),
 		Finished: req.GetState().GetFinished(),
 		Started:  req.GetState().GetStarted(),
-		Step:     req.GetState().GetName(),
+		StepUUID: req.GetState().GetStepUuid(),
 		Exited:   req.GetState().GetExited(),
 	}
 	res := new(proto.Empty)
@@ -112,7 +111,7 @@ func (s *WoodpeckerServer) Update(c context.Context, req *proto.UpdateRequest) (
 		ExitCode: int(req.GetState().GetExitCode()),
 		Finished: req.GetState().GetFinished(),
 		Started:  req.GetState().GetStarted(),
-		Step:     req.GetState().GetName(),
+		StepUUID: req.GetState().GetStepUuid(),
 		Exited:   req.GetState().GetExited(),
 	}
 	res := new(proto.Empty)
@@ -126,7 +125,7 @@ func (s *WoodpeckerServer) Done(c context.Context, req *proto.DoneRequest) (*pro
 		ExitCode: int(req.GetState().GetExitCode()),
 		Finished: req.GetState().GetFinished(),
 		Started:  req.GetState().GetStarted(),
-		Step:     req.GetState().GetName(),
+		StepUUID: req.GetState().GetStepUuid(),
 		Exited:   req.GetState().GetExited(),
 	}
 	res := new(proto.Empty)
@@ -164,6 +163,11 @@ func (s *WoodpeckerServer) RegisterAgent(c context.Context, req *proto.RegisterA
 	agentID, err := s.peer.RegisterAgent(c, req.GetPlatform(), req.GetBackend(), req.GetVersion(), req.GetCapacity())
 	res.AgentId = agentID
 	return res, err
+}
+
+func (s *WoodpeckerServer) UnregisterAgent(ctx context.Context, _ *proto.Empty) (*proto.Empty, error) {
+	err := s.peer.UnregisterAgent(ctx)
+	return new(proto.Empty), err
 }
 
 func (s *WoodpeckerServer) ReportHealth(c context.Context, req *proto.ReportHealthRequest) (*proto.Empty, error) {

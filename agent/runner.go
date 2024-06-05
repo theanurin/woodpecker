@@ -23,33 +23,33 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"github.com/tevino/abool"
+	"github.com/tevino/abool/v2"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/woodpecker-ci/woodpecker/pipeline"
-	backend "github.com/woodpecker-ci/woodpecker/pipeline/backend/types"
-	"github.com/woodpecker-ci/woodpecker/pipeline/rpc"
-	"github.com/woodpecker-ci/woodpecker/shared/utils"
+	"go.woodpecker-ci.org/woodpecker/v2/pipeline"
+	backend "go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/types"
+	"go.woodpecker-ci.org/woodpecker/v2/pipeline/rpc"
+	"go.woodpecker-ci.org/woodpecker/v2/shared/utils"
 )
 
 var ErrNoWorkflow = errors.New("no workflow")
 
 type Runner struct {
-	client    rpc.Peer
-	filter    rpc.Filter
-	hostname  string
-	counter   *State
-	engine    *backend.Engine
+	client   rpc.Peer
+	filter   rpc.Filter
+	hostname string
+	counter  *State
+	backend  *backend.Backend
 	ephemeral bool
 }
 
-func NewRunner(workEngine rpc.Peer, f rpc.Filter, h string, state *State, backend *backend.Engine, ephemeral bool) Runner {
+func NewRunner(workEngine rpc.Peer, f rpc.Filter, h string, state *State, backend *backend.Backend, ephemeral bool) Runner {
 	return Runner{
-		client:    workEngine,
-		filter:    f,
-		hostname:  h,
-		counter:   state,
-		engine:    backend,
+		client:   workEngine,
+		filter:   f,
+		hostname: h,
+		counter:  state,
+		backend:  backend,
 		ephemeral: ephemeral,
 	}
 }
@@ -145,18 +145,19 @@ func (r *Runner) Run(runnerCtx context.Context) error {
 	state := rpc.State{}
 	state.Started = time.Now().Unix()
 
-	err = r.client.Init(ctxmeta, work.ID, state)
+	err = r.client.Init(runnerCtx, work.ID, state)
 	if err != nil {
 		logger.Error().Err(err).Msg("pipeline initialization failed")
 	}
 
 	var uploads sync.WaitGroup
+	//nolint:contextcheck
 	err = pipeline.New(work.Config,
 		pipeline.WithContext(workflowCtx),
 		pipeline.WithTaskUUID(fmt.Sprint(work.ID)),
 		pipeline.WithLogger(r.createLogger(logger, &uploads, work)),
 		pipeline.WithTracer(r.createTracer(ctxmeta, logger, work)),
-		pipeline.WithEngine(*r.engine),
+		pipeline.WithBackend(*r.backend),
 		pipeline.WithDescription(map[string]string{
 			"ID":       work.ID,
 			"Repo":     repoName,
@@ -169,16 +170,17 @@ func (r *Runner) Run(runnerCtx context.Context) error {
 
 	if canceled.IsSet() {
 		state.Error = ""
-		state.ExitCode = 137
+		state.ExitCode = pipeline.ExitCodeKilled
 	} else if err != nil {
 		pExitError := &pipeline.ExitError{}
-		if errors.As(err, &pExitError) {
+		switch {
+		case errors.As(err, &pExitError):
 			state.ExitCode = pExitError.Code
-		} else if errors.Is(err, pipeline.ErrCancel) {
+		case errors.Is(err, pipeline.ErrCancel):
 			state.Error = ""
-			state.ExitCode = 137
+			state.ExitCode = pipeline.ExitCodeKilled
 			canceled.SetTo(true)
-		} else {
+		default:
 			state.ExitCode = 1
 			state.Error = err.Error()
 		}
@@ -199,7 +201,7 @@ func (r *Runner) Run(runnerCtx context.Context) error {
 		Int("exit_code", state.ExitCode).
 		Msg("updating pipeline status")
 
-	if err := r.client.Done(ctxmeta, work.ID, state); err != nil {
+	if err := r.client.Done(runnerCtx, work.ID, state); err != nil {
 		logger.Error().Err(err).Msg("updating pipeline status failed")
 	} else {
 		logger.Debug().Msg("updating pipeline status complete")

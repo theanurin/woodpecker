@@ -20,8 +20,8 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/woodpecker-ci/woodpecker/cmd/common"
-	"github.com/woodpecker-ci/woodpecker/shared/constant"
+	"go.woodpecker-ci.org/woodpecker/v2/shared/constant"
+	"go.woodpecker-ci.org/woodpecker/v2/shared/logger"
 )
 
 var flags = append([]cli.Flag{
@@ -38,17 +38,12 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		EnvVars: []string{"WOODPECKER_HOST"},
 		Name:    "server-host",
-		Usage:   "server fully qualified url (<scheme>://<host>)",
+		Usage:   "server fully qualified url (<scheme>://<host>[/<prefixpath>])",
 	},
 	&cli.StringFlag{
 		EnvVars: []string{"WOODPECKER_WEBHOOK_HOST"},
 		Name:    "server-webhook-host",
-		Usage:   "server fully qualified url for forge's Webhooks (<scheme>://<host>)",
-	},
-	&cli.StringFlag{
-		EnvVars: []string{"WOODPECKER_ROOT_PATH", "WOODPECKER_ROOT_URL"},
-		Name:    "root-path",
-		Usage:   "server url root (used for statics loading when having a url path prefix)",
+		Usage:   "server fully qualified url for forge's Webhooks (<scheme>://<host>[/<prefixpath>])",
 	},
 	&cli.StringFlag{
 		EnvVars: []string{"WOODPECKER_SERVER_ADDR"},
@@ -160,12 +155,6 @@ var flags = append([]cli.Flag{
 		Usage:   "The maximum time in minutes you can set in the repo settings before a pipeline gets killed",
 		Value:   120,
 	},
-	&cli.StringFlag{
-		EnvVars: []string{"WOODPECKER_DOCS"},
-		Name:    "docs",
-		Usage:   "link to user documentation",
-		Value:   "https://woodpecker-ci.org/",
-	},
 	&cli.DurationFlag{
 		EnvVars: []string{"WOODPECKER_SESSION_EXPIRES"},
 		Name:    "session-expires",
@@ -230,7 +219,7 @@ var flags = append([]cli.Flag{
 		EnvVars:  []string{"WOODPECKER_DATABASE_DATASOURCE"},
 		Name:     "datasource",
 		Usage:    "database driver configuration string",
-		Value:    "woodpecker.sqlite",
+		Value:    datasourceDefaultValue(),
 		FilePath: os.Getenv("WOODPECKER_DATABASE_DATASOURCE_FILE"),
 	},
 	&cli.StringFlag{
@@ -250,7 +239,7 @@ var flags = append([]cli.Flag{
 		EnvVars: []string{"WOODPECKER_STATUS_CONTEXT_FORMAT"},
 		Name:    "status-context-format",
 		Usage:   "status context format",
-		Value:   "{{ .context }}/{{ .event }}/{{ .workflow }}",
+		Value:   "{{ .context }}/{{ .event }}/{{ .workflow }}{{if not (eq .axis_id 0)}}/{{.axis_id}}{{end}}",
 	},
 	&cli.BoolFlag{
 		EnvVars: []string{"WOODPECKER_MIGRATIONS_ALLOW_LONG"},
@@ -262,6 +251,16 @@ var flags = append([]cli.Flag{
 		Name:    "enable-swagger",
 		Value:   true,
 	},
+	&cli.BoolFlag{
+		EnvVars: []string{"WOODPECKER_DISABLE_VERSION_CHECK"},
+		Usage:   "Disable version check in admin web ui.",
+		Name:    "skip-version-check",
+	},
+	&cli.StringSliceFlag{
+		EnvVars: []string{"WOODPECKER_ADDONS"},
+		Name:    "addons",
+		Usage:   "list of addon files",
+	},
 	//
 	// backend options for pipeline compiler
 	//
@@ -272,7 +271,7 @@ var flags = append([]cli.Flag{
 	},
 	&cli.StringFlag{
 		EnvVars: []string{"WOODPECKER_BACKEND_HTTP_PROXY", "HTTP_PROXY", "http_proxy"},
-		Usage:   "if set, pass the environment variable down as \"NO_PROXY\" to steps",
+		Usage:   "if set, pass the environment variable down as \"HTTP_PROXY\" to steps",
 		Name:    "backend-http-proxy",
 	},
 	&cli.StringFlag{
@@ -439,6 +438,43 @@ var flags = append([]cli.Flag{
 		Usage:   "gitlab skip ssl verification",
 	},
 	//
+	// Bitbucket DataCenter/Server (previously Stash)
+	//
+	&cli.BoolFlag{
+		EnvVars: []string{"WOODPECKER_BITBUCKET_DC"},
+		Name:    "bitbucket-dc",
+		Usage:   "Bitbucket DataCenter/Server driver is enabled",
+	},
+	&cli.StringFlag{
+		EnvVars: []string{"WOODPECKER_BITBUCKET_DC_URL"},
+		Name:    "bitbucket-dc-server",
+		Usage:   "Bitbucket DataCenter/Server server address",
+	},
+	&cli.StringFlag{
+		EnvVars:  []string{"WOODPECKER_BITBUCKET_DC_CLIENT_ID"},
+		Name:     "bitbucket-dc-client-id",
+		Usage:    "Bitbucket DataCenter/Server OAuth 2.0 client id",
+		FilePath: os.Getenv("WOODPECKER_BITBUCKET_DC_CLIENT_ID_FILE"),
+	},
+	&cli.StringFlag{
+		EnvVars:  []string{"WOODPECKER_BITBUCKET_DC_CLIENT_SECRET"},
+		Name:     "bitbucket-dc-client-secret",
+		Usage:    "Bitbucket DataCenter/Server OAuth 2.0 client secret",
+		FilePath: os.Getenv("WOODPECKER_BITBUCKET_DC_CLIENT_SECRET_FILE"),
+	},
+	&cli.StringFlag{
+		EnvVars:  []string{"WOODPECKER_BITBUCKET_DC_GIT_USERNAME"},
+		Name:     "bitbucket-dc-git-username",
+		Usage:    "Bitbucket DataCenter/Server service account username",
+		FilePath: os.Getenv("WOODPECKER_BITBUCKET_DC_GIT_USERNAME_FILE"),
+	},
+	&cli.StringFlag{
+		EnvVars:  []string{"WOODPECKER_BITBUCKET_DC_GIT_PASSWORD"},
+		Name:     "bitbucket-dc-git-password",
+		Usage:    "Bitbucket DataCenter/Server service account password",
+		FilePath: os.Getenv("WOODPECKER_BITBUCKET_DC_GIT_PASSWORD_FILE"),
+	},
+	//
 	// development flags
 	//
 	&cli.StringFlag{
@@ -450,7 +486,7 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		EnvVars: []string{"WOODPECKER_DEV_OAUTH_HOST"},
 		Name:    "server-dev-oauth-host",
-		Usage:   "server fully qualified url (<scheme>://<host>) used for oauth redirect (used for development)",
+		Usage:   "server fully qualified url (<scheme>://<host>[/<prefixpath>]) used for oauth redirect (used for development)",
 		Value:   "",
 		Hidden:  true,
 	},
@@ -473,4 +509,14 @@ var flags = append([]cli.Flag{
 		Name:    "encryption-disable-flag",
 		Usage:   "Flag to decrypt all encrypted data and disable encryption on server",
 	},
-}, common.GlobalLoggerFlags...)
+}, logger.GlobalLoggerFlags...)
+
+// If woodpecker is running inside a container the default value for
+// the datasource is different from running outside a container.
+func datasourceDefaultValue() string {
+	_, found := os.LookupEnv("WOODPECKER_IN_CONTAINER")
+	if found {
+		return "/var/lib/woodpecker/woodpecker.sqlite"
+	}
+	return "woodpecker.sqlite"
+}

@@ -51,7 +51,7 @@ func (interceptor *AuthInterceptor) Unary() grpc.UnaryClientInterceptor {
 	return func(
 		ctx context.Context,
 		method string,
-		req, reply interface{},
+		req, reply any,
 		cc *grpc.ClientConn,
 		invoker grpc.UnaryInvoker,
 		opts ...grpc.CallOption,
@@ -107,7 +107,7 @@ func (interceptor *AuthInterceptor) refreshToken() error {
 	}
 
 	interceptor.accessToken = accessToken
-	log.Debug().Msgf("Token refreshed: %v", accessToken)
+	log.Trace().Msg("token refreshed")
 
 	return nil
 }

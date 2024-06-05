@@ -26,18 +26,21 @@
       <div class="w-full md:w-auto md:mx-4 flex items-center min-w-0">
         <span class="text-wp-text-alt-100 <md:hidden">#{{ pipeline.number }}</span>
         <span class="text-wp-text-alt-100 <md:hidden mx-2">-</span>
-        <span class="text-wp-text-100 <md:underline whitespace-nowrap overflow-hidden overflow-ellipsis">{{
-          message
-        }}</span>
+        <span
+          class="text-wp-text-100 <md:underline whitespace-nowrap overflow-hidden overflow-ellipsis"
+          :title="message"
+          >{{ title }}</span
+        >
       </div>
 
       <div
         class="grid grid-rows-2 grid-flow-col w-full md:ml-auto md:w-96 py-2 gap-x-4 gap-y-2 flex-shrink-0 text-wp-text-100"
       >
         <div class="flex space-x-2 items-center min-w-0">
-          <Icon v-if="pipeline.event === 'pull_request'" name="pull_request" />
+          <Icon v-if="pipeline.event === 'pull_request'" name="pull-request" />
+          <Icon v-else-if="pipeline.event === 'pull_request_closed'" name="pull-request-closed" />
           <Icon v-else-if="pipeline.event === 'deployment'" name="deployment" />
-          <Icon v-else-if="pipeline.event === 'tag'" name="tag" />
+          <Icon v-else-if="pipeline.event === 'tag' || pipeline.event === 'release'" name="tag" />
           <Icon v-else-if="pipeline.event === 'cron'" name="push" />
           <Icon v-else-if="pipeline.event === 'manual'" name="manual-pipeline" />
           <Icon v-else name="push" />
@@ -54,14 +57,9 @@
           <span class="truncate">{{ duration }}</span>
         </div>
 
-        <div class="flex space-x-2 items-center min-w-0">
+        <div class="flex space-x-2 items-center min-w-0" :title="created">
           <Icon name="since" />
-          <Tooltip>
-            <span>{{ since }}</span>
-            <template #popper>
-              <span class="font-bold">{{ $t('repo.pipeline.created') }}</span> {{ created }}
-            </template>
-          </Tooltip>
+          <span>{{ since }}</span>
         </div>
       </div>
     </div>
@@ -69,7 +67,6 @@
 </template>
 
 <script lang="ts" setup>
-import { Tooltip } from 'floating-vue';
 import { toRef } from 'vue';
 
 import Icon from '~/components/atomic/Icon.vue';
@@ -85,5 +82,5 @@ const props = defineProps<{
 }>();
 
 const pipeline = toRef(props, 'pipeline');
-const { since, duration, message, prettyRef, created } = usePipeline(pipeline);
+const { since, duration, message, title, prettyRef, created } = usePipeline(pipeline);
 </script>
